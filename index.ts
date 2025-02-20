@@ -41,12 +41,6 @@ const swapResponse = await (
         body: JSON.stringify({
             quoteResponse,
             userPublicKey: signer_account.address,
-            priorityLevelWithMaxLamports: {
-              maxLamports: 1000,
-              priorityLevel: "veryHigh" // If you want to land transaction fast, set this to use `veryHigh`. You will pay on average higher priority fee.
-              // jitoTipLamports: 10000000
-            },
-            correctLastValidBlockHeight: true
         })
     })
   ).json();
@@ -93,7 +87,7 @@ try {
     await getRecentSignatureConfirmationPromise({
         commitment: 'confirmed',
         signature,
-        abortSignal: AbortSignal.timeout(10000),
+        abortSignal: AbortSignal.timeout(60000),
     });
     console.log(`CONFIRMED: https://solscan.io/tx/${signature}`);
 } catch (e) {
