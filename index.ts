@@ -25,7 +25,7 @@ const signer_account = await createKeyPairSignerFromBytes(new Uint8Array(private
 
 const quoteResponse = await (
     await fetch(
-        'https://quote-api.jup.ag/v6/quote?inputMint=JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=0'
+        'https://api.jup.ag/swap/v1/quote?inputMint=JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=10'
     )
   ).json();
   
