@@ -1,4 +1,4 @@
-# web3-js-v22
+# web3-js-v2
 
 To install dependencies:
 
