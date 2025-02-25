@@ -1,20 +1,20 @@
 import {
-    createKeyPairSignerFromBytes,
+    createKeyPairSignerFromPrivateKeyBytes,
     createSolanaRpc,
-    createSolanaRpcSubscriptions,
-    getBase64Encoder,
     getBase64EncodedWireTransaction,
     getTransactionDecoder,
+    signTransaction,
 } from '@solana/web3.js';
 
-import { createRecentSignatureConfirmationPromiseFactory } from '@solana/transaction-confirmation';
+const rpc = createSolanaRpc(process.env.rpc || '');
 
-const rpc_url = createSolanaRpc(process.env.RPC_URL || '');
-const rpc_wss = createSolanaRpcSubscriptions(process.env.RPC_WSS || '');
-
-// For Uint8Array format private key
+// For 32 bytes Uint8Array format private key
 const privateKeyArray = JSON.parse(process.env.PRIVATE_KEY_ARRAY || '[]');
-const signer_account = await createKeyPairSignerFromBytes(new Uint8Array(privateKeyArray));
+const signer_account = await createKeyPairSignerFromPrivateKeyBytes(new Uint8Array(privateKeyArray));
+
+// For 64 bytes Uint8Array format private key
+// const privateKeyArray = JSON.parse(process.env.PRIVATE_KEY_ARRAY || '[]');
+// const signer_account = await createKeyPairSignerFromBytes(new Uint8Array(privateKeyArray));
 
 // For base58 format private key
 // Import getBase58Encoder
@@ -27,8 +27,7 @@ const quoteResponse = await (
     await fetch(
         'https://api.jup.ag/swap/v1/quote?inputMint=JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN&outputMint=EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v&amount=100000&slippageBps=10'
     )
-  ).json();
-  
+).json();
 // console.log(quoteResponse);
 
 const swapResponse = await (
@@ -41,56 +40,81 @@ const swapResponse = await (
         body: JSON.stringify({
             quoteResponse,
             userPublicKey: signer_account.address,
+            prioritizationFeeLamports: 0,
         })
     })
-  ).json();
-  
+).json();
 // console.log(swapResponse);
 
+// Extract the transaction from the swap response
 const base64EncodedTransaction = swapResponse.swapTransaction;
-
 // console.log(base64EncodedTransaction);
 
-// Deserialize the base64 transaction to sign (before sending)
-// https://github.com/anza-xyz/solana-web3.js/blob/325925c76d939b2a8065f5174d99de6663255b8b/examples/deserialize-transaction/src/example.ts#L176
-const transactionBytes = getBase64Encoder().encode(base64EncodedTransaction);
-// console.log(transactionBytes);
+// Convert the base64 encoded transaction to a buffer
+const swapTransactionBuffer = Buffer.from(base64EncodedTransaction, 'base64');
+// console.log(swapTransactionBuffer);
 
-const decodedTransaction = getTransactionDecoder().decode(transactionBytes);
+// Decode the buffer to a transaction (messageBytes and signatures)
+const decodedTransaction = getTransactionDecoder().decode(swapTransactionBuffer);
 // console.log(decodedTransaction);
 
 // Sign the transaction
-const [signatureDictionary] = await signer_account.signTransactions([decodedTransaction]);
-const signatureBytes = signatureDictionary[signer_account.address];
-// console.log(signatureBytes);
+const signedTransaction = await signTransaction(
+    [signer_account.keyPair],
+    decodedTransaction
+)
+// console.log(signedTransaction);
 
-// Now we can serialize the transaction back to base64 for sending
-const serializedTransaction = getBase64EncodedWireTransaction({
-    messageBytes: decodedTransaction.messageBytes,
-    signatures: { [signer_account.address]: signatureBytes }
-});
+// Serialize the signed transaction back to base64 format
+const serializedTransaction = getBase64EncodedWireTransaction(signedTransaction);
 // console.log(serializedTransaction);
 
-// Send the transaction
-const signature = await rpc_url.sendTransaction(serializedTransaction, { 
+// Send the transaction to the network
+const signature = await rpc.sendTransaction(serializedTransaction, { 
     encoding: 'base64',
     maxRetries: 0n,
     skipPreflight: true 
 }).send();
 
-// Wait for the transaction to be confirmed
-const getRecentSignatureConfirmationPromise = createRecentSignatureConfirmationPromiseFactory({
-    rpc: rpc_url,
-    rpcSubscriptions: rpc_wss,
-});
-try {
-    await getRecentSignatureConfirmationPromise({
-        commitment: 'confirmed',
-        signature,
-        abortSignal: AbortSignal.timeout(60000),
-    });
-    console.log(`CONFIRMED: https://solscan.io/tx/${signature}`);
-} catch (e) {
-    console.error(`FAILED: https://solscan.io/tx/${signature}\n`);
-    throw e;
-}
+// Wait for the transaction to be confirmed and handle expiry, timeout, error or success.
+const startTime = Date.now();
+
+while (true) {
+    try {
+        // Check if block height exceeded first
+        const currentBlockHeight = await rpc.getBlockHeight({ commitment: 'confirmed' }).send();
+        if (currentBlockHeight > BigInt(swapResponse.lastValidBlockHeight)) {
+            console.error('Transaction expired: Block height exceeded');
+            break;
+        }
+
+        // Check if transaction is confirmed
+        const transaction = await rpc.getTransaction(signature, {
+            commitment: 'confirmed',
+            maxSupportedTransactionVersion: 0,
+        }).send();
+
+        if (transaction === null) {
+            await new Promise(resolve => setTimeout(resolve, 400));
+            continue;
+        }
+
+        if (transaction === null || transaction.meta === null) {
+            throw new Error('Transaction not found or not confirmed');
+        }
+
+        if (transaction.meta.err) {
+            console.error('Transaction failed with error:', transaction.meta.err);
+            break;
+        }
+
+        console.log(`https://solscan.io/tx/${signature}`);
+        break;
+    } catch (error) {
+        if (error instanceof Error) {
+            console.error('Error checking transaction:', error.message);
+        } else {
+            console.error('Error checking transaction:', error);
+        }
+    }
+};
