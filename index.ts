@@ -40,7 +40,6 @@ const swapResponse = await (
         body: JSON.stringify({
             quoteResponse,
             userPublicKey: signer_account.address,
-            prioritizationFeeLamports: 0,
         })
     })
 ).json();
